@@ -10,7 +10,8 @@ def cmd_reap(args):
   """Create a harvest from local dir or GitHub URL."""
   engine = HarvestEngine(
     max_bytes=args.max_bytes,
-    max_files=args.max_files
+    max_files=args.max_files,
+    apply_default_excludes=(not args.no_default_excludes)
   )
   
   payload = engine.harvest_local(args.target)
@@ -124,6 +125,8 @@ def main(argv=None) -> int:
   pr.add_argument("-o", "--out", default=None)
   pr.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
   pr.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+  pr.add_argument("--no-default-excludes", action="store_true",
+                  help="Do not apply the built-in exclude lists (folders, extensions, lockfiles)")
   pr.set_defaults(func=cmd_reap)
   
   # query command

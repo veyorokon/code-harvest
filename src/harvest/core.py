@@ -11,9 +11,48 @@ import urllib.request
 # --- constants / defaults ---
 DEFAULT_MAX_BYTES = 524288
 DEFAULT_MAX_FILES = 5000
-DEFAULT_SKIP_EXT = {".log",".ds_store","_py.html",".coverage",".wav",".db",".mp4",".mp3",".jpg",".jpeg",".png",".gif",".bmp",".svg",".ico",".tiff",".tif",".pdf",".zip",".tar",".gz",".rar",".7z",".exe",".dll",".pyc",".dat",".bak",".dir",".lock",".min.js",".min.css",".ipynb",".pt",".onnx",".h5",".pth",".npz",".npy"}
-DEFAULT_SKIP_FILES = {"index.jsx","index.tsx","__init__.py"}
-DEFAULT_SKIP_FOLDERS = {"node_modules",".git","htmlcov","dist","build","migrations",".pytest_cache","logs",".venv","__pycache__", ".mypy_cache",".ruff_cache",".vscode",".idea",".next",".expo",".parcel-cache",".turbo","coverage","site-packages"}
+DEFAULT_SKIP_EXT = {
+  # text/logs & temp
+  ".log",".tmp",".temp",".ds_store","_py.html",".coverage",
+  # databases & checkpoints
+  ".db",".sqlite",".sqlite3",".db-wal",".db-shm",".ckpt",".safetensors",
+  # audio/video
+  ".wav",".mp3",".flac",".ogg",".m4a",".mp4",".mov",".avi",".mkv",".webm",
+  # images & fonts
+  ".jpg",".jpeg",".png",".gif",".bmp",".svg",".ico",".tiff",".tif",".webp",".avif",".heic",".ttf",".otf",".woff",".woff2",
+  # archives & bundles
+  ".zip",".tar",".gz",".rar",".7z",".xz",".bz2",".zst",
+  # binaries & objects
+  ".exe",".dll",".so",".dylib",".o",".obj",".a",".lib",".wasm",".pyc",".dat",
+  # misc large
+  ".bak",".dir",".lock",".min.js",".min.css",".map",
+  # notebooks & ML artifacts
+  ".ipynb",".pt",".onnx",".h5",".pth",".npz",".npy",".pb",".tflite"
+}
+DEFAULT_SKIP_FILES = {
+  "index.jsx","index.tsx","__init__.py","harvest.json",
+  # lockfiles (covered again below with LOCKFILE_NAMES in should_skip_path)
+  "yarn.lock","package-lock.json","pnpm-lock.yaml","poetry.lock","Pipfile.lock","Cargo.lock","Gemfile.lock","composer.lock","go.sum"
+}
+DEFAULT_SKIP_FOLDERS = {
+  "node_modules","vendor",
+  ".git",".hg",".svn",
+  "htmlcov","dist","build","out","bin","obj","target",
+  "migrations",
+  # caches & tooling
+  ".pytest_cache",".mypy_cache",".ruff_cache",".tox",".nox",".cache",".gradle",".ipynb_checkpoints",".dart_tool",".direnv",
+  ".vscode",".idea",".next",".expo",".parcel-cache",".turbo",".yarn",".pnp",".nx",".nuxt",".svelte-kit",".angular",
+  # site/docs/storybook artifacts
+  "storybook-static",".docusaurus","site","public/build",
+  # mobile / platform
+  "Pods","DerivedData",
+  "coverage","site-packages","__pycache__"
+}
+
+# Explicit lockfile names (kept separate for clarity in should_skip_path)
+LOCKFILE_NAMES = {
+  "yarn.lock","package-lock.json","pnpm-lock.yaml","poetry.lock","Pipfile.lock","Cargo.lock","Gemfile.lock","composer.lock","go.sum"
+}
 LANG_MAP = {".py":"python",".js":"javascript",".jsx":"javascriptreact",".ts":"typescript",".tsx":"typescriptreact",".json":"json",".md":"markdown",".yml":"yaml",".yaml":"yaml",".toml":"toml",".sh":"shell"}
 IDENT = r"[A-Za-z_$][\w$]*"
 
@@ -148,16 +187,24 @@ class FileEntry:
 
 class HarvestEngine:
   def __init__(self, max_bytes=DEFAULT_MAX_BYTES, max_files=DEFAULT_MAX_FILES, 
-               skip_ext=None, skip_files=None, skip_folders=None):
+               skip_ext=None, skip_files=None, skip_folders=None,
+               apply_default_excludes=True):
     self.max_bytes = max_bytes
     self.max_files = max_files
     self.skip_ext = skip_ext or DEFAULT_SKIP_EXT
     self.skip_files = skip_files or DEFAULT_SKIP_FILES
     self.skip_folders = skip_folders or DEFAULT_SKIP_FOLDERS
+    self.apply_default_excludes = apply_default_excludes
   
   def should_skip_path(self, path: Path) -> bool:
+    if not self.apply_default_excludes: return False
     if path.suffix.lower() in self.skip_ext: return True
     if path.name in self.skip_files: return True
+    # Skip harvest.json pattern files
+    if path.name.endswith('.harvest.json'): return True
+    # skip explicit lockfiles
+    if path.name in LOCKFILE_NAMES:
+        return True
     for part in path.parts:
       if part in self.skip_folders: return True
     return False

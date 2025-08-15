@@ -11,6 +11,15 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
   tr:hover{background:#fafafa}
   pre{background:#0b1020;color:#e6e6e6;padding:12px;border-radius:8px;overflow:auto;white-space:pre}
   #pane{position:sticky;top:60px;height:calc(100vh - 88px)}
+  .highlight-toggle{margin-left:8px;font-size:12px}
+  /* Syntax highlighting colors */
+  .hl-keyword{color:#569cd6}
+  .hl-string{color:#ce9178}
+  .hl-comment{color:#6a9955}
+  .hl-number{color:#b5cea8}
+  .hl-function{color:#dcdcaa}
+  .hl-class{color:#4ec9b0}
+  .hl-operator{color:#d4d4d4}
   #meta small{color:#666}
   .muted{color:#666}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
@@ -47,7 +56,7 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
     </div>
   </div>
   <aside id=pane>
-    <div class="muted">Preview</div>
+    <div class="muted">Preview <button id="highlightToggle" class="button highlight-toggle">Highlight</button></div>
     <pre id=code>(click a chunk row)</pre>
   </aside>
 </main>
@@ -65,6 +74,128 @@ const shorten = (s, head=8, tail=6) => !s ? "" : (s.length <= head+tail+1 ? s : 
 const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch {} }
 
 let __meta = null;
+let highlightEnabled = false;
+
+// Lightweight syntax highlighter
+function highlightCode(code, language) {
+  if (!highlightEnabled || !code) return escapeHtml(code);
+  
+  // Basic tokenizer for common languages
+  const tokens = tokenize(code, language);
+  return tokens.map(token => {
+    if (token.type === 'text') return escapeHtml(token.value);
+    return `<span class="hl-${token.type}">${escapeHtml(token.value)}</span>`;
+  }).join('');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function tokenize(code, language) {
+  const tokens = [];
+  let pos = 0;
+  
+  // Language-specific patterns
+  const patterns = getLanguagePatterns(language);
+  
+  while (pos < code.length) {
+    let matched = false;
+    
+    for (const pattern of patterns) {
+      const regex = new RegExp(pattern.regex, 'g');
+      regex.lastIndex = pos;
+      const match = regex.exec(code);
+      
+      if (match && match.index === pos) {
+        tokens.push({ type: pattern.type, value: match[0] });
+        pos = regex.lastIndex;
+        matched = true;
+        break;
+      }
+    }
+    
+    if (!matched) {
+      tokens.push({ type: 'text', value: code[pos] });
+      pos++;
+    }
+  }
+  
+  return tokens;
+}
+
+function getLanguagePatterns(language) {
+  switch (language) {
+    case 'python':
+      return [
+        { regex: '#.*$', type: 'comment' },
+        { regex: '\\\\b(def|class|if|elif|else|for|while|try|except|finally|with|import|from|return|yield|lambda|and|or|not|in|is|True|False|None)\\\\b', type: 'keyword' },
+        { regex: '"[^"]*"', type: 'string' },
+        { regex: "'[^']*'", type: 'string' },
+        { regex: '\\\\d+', type: 'number' }
+      ];
+    case 'javascript':
+    case 'typescript':
+      return [
+        { regex: '//.*$', type: 'comment' },
+        { regex: '\\\\b(function|const|let|var|if|else|for|while|try|catch|finally|return|class|extends|import|export|default|async|await|true|false|null|undefined)\\\\b', type: 'keyword' },
+        { regex: '"[^"]*"', type: 'string' },
+        { regex: "'[^']*'", type: 'string' },
+        { regex: '`[^`]*`', type: 'string' },
+        { regex: '\\\\d+', type: 'number' }
+      ];
+    default:
+      return [
+        { regex: '//.*$', type: 'comment' },
+        { regex: '"[^"]*"', type: 'string' },
+        { regex: "'[^']*'", type: 'string' },
+        { regex: '\\\\d+', type: 'number' }
+      ];
+  }
+}
+
+// Helper functions for highlighting
+function getCurrentLanguage() {
+  // Try to get language from current selection or context
+  const rows = document.querySelectorAll('#results tbody tr');
+  for (const row of rows) {
+    if (row.style.outline.includes('solid')) {
+      const cells = row.querySelectorAll('td');
+      for (const cell of cells) {
+        if (cell.textContent && ['python', 'javascript', 'typescript', 'yaml', 'markdown'].includes(cell.textContent)) {
+          return cell.textContent;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function displayCode(content, language) {
+  const codeEl = document.getElementById('code');
+  if (highlightEnabled && content && content !== '(click a chunk row)') {
+    codeEl.innerHTML = highlightCode(content, language);
+  } else {
+    codeEl.textContent = content;
+  }
+}
+
+function toggleHighlight() {
+  highlightEnabled = !highlightEnabled;
+  const btn = document.getElementById('highlightToggle');
+  btn.textContent = highlightEnabled ? 'Plain' : 'Highlight';
+  btn.style.backgroundColor = highlightEnabled ? '#e6f3ff' : '';
+  
+  // Re-render current content
+  const codeEl = document.getElementById('code');
+  const currentContent = codeEl.textContent || codeEl.innerText;
+  if (currentContent && currentContent !== '(click a chunk row)') {
+    displayCode(currentContent, getCurrentLanguage());
+  }
+}
+
 function getState(){
   const u = new URL(location.href);
   return {
@@ -228,7 +359,7 @@ async function search(append = false){
         const j2 = await r2.json();
         // Convert escaped newlines to actual newlines
         const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
-        document.getElementById('code').textContent = content;
+        displayCode(content, getCurrentLanguage());
       } catch(e) {
         document.getElementById('code').textContent = '(error loading file preview)';
       }
@@ -322,7 +453,7 @@ function renderTable() {
       const j2 = await r2.json();
       // Convert escaped newlines to actual newlines
       const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
-      document.getElementById('code').textContent = content;
+      displayCode(content, getCurrentLanguage());
     } catch(e) {
       document.getElementById('code').textContent = '(error loading file: ' + fp + ')';
     }
@@ -437,6 +568,7 @@ document.getElementById('showTech').onchange = resetAndSearch;
 document.getElementById('entity').onchange = ()=>{ writeURL(getState()); resetAndSearch(); };
 document.getElementById('lang').onchange = ()=>{ writeURL(getState()); resetAndSearch(); };
 document.getElementById('copyLink').onclick = ()=> copy(location.href);
+document.getElementById('highlightToggle').onclick = toggleHighlight;
 document.getElementById('export').onclick = ()=>{
   const s = getState();
   const params = stateToParams(s);
@@ -463,7 +595,7 @@ function openPreview(){
   fetch(`api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end}`).then(r=>r.json()).then(j=>{
     // Convert escaped newlines to actual newlines
     const content = (j.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
-    $('#code').textContent = content;
+    displayCode(content, getCurrentLanguage());
   });
 }
 const PALETTE_CMDS = [
