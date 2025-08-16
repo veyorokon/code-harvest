@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harvest-code"
-version = "1.2.0"
+version = "1.2.3"
 description = "Harvest codebases into portable JSON + chunks for RAG and tooling"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "veyorokon", email = "veyorokon@users.noreply.github.com"}]
 requires-python = ">=3.9"
 dependencies = []
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Environment :: Console"
 ]
 
