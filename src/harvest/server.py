@@ -7,7 +7,9 @@ from urllib.parse import urlparse, parse_qs
 from .ui import SERVE_HTML
 
 class ServeState:
-  def __init__(self, payload): self.payload=payload
+  def __init__(self, payload, harvest_path=None): 
+    self.payload = payload
+    self.harvest_path = harvest_path
 
 def make_handler(state: ServeState):
   class Handler(SimpleHTTPRequestHandler):
@@ -31,7 +33,17 @@ def make_handler(state: ServeState):
         return
       
       if self.path == "/api/meta":
-        self.send_json(state.payload["metadata"])
+        # Always read from disk to get fresh version updates from watcher
+        if state.harvest_path:
+          try:
+            with open(state.harvest_path, "r", encoding="utf-8") as f:
+              fresh_payload = json.load(f)
+            meta = fresh_payload.get("metadata", {})
+          except Exception:
+            meta = state.payload.get("metadata", {})
+        else:
+          meta = state.payload.get("metadata", {})
+        self.send_json(meta)
         return
       
       if self.path.startswith("/api/search"):
@@ -168,7 +180,7 @@ def serve_harvest(harvest_path: str, port: int = 8787):
   from pathlib import Path
   
   payload = json.loads(Path(harvest_path).read_text(encoding="utf-8"))
-  state = ServeState(payload)
+  state = ServeState(payload, harvest_path)
   handler = make_handler(state)
   
   server = HTTPServer(("localhost", port), handler)

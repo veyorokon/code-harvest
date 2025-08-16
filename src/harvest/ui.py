@@ -630,4 +630,37 @@ document.addEventListener('keydown', (e)=>{
   if (e.key==='Escape'){ closePalette(); return; }
 });
 $('#palQ')?.addEventListener('input', (e)=> renderPalette(e.target.value));
+
+// Version polling for live updates (watch mode support)
+(function(){
+  let currentVersion = null;
+  async function fetchVersion() {
+    try {
+      const r = await fetch('/api/meta', { cache: 'no-store' });
+      const j = await r.json();
+      return j.version || 0;
+    } catch { return null; }
+  }
+  function showUpdateNotice() {
+    let el = document.getElementById('harvest-update-tip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'harvest-update-tip';
+      el.style.cssText = 'position:fixed;right:12px;bottom:12px;padding:8px 12px;background:#ffd24d;border-radius:8px;font:13px/1.2 system-ui;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.1);z-index:1000';
+      el.textContent = 'Updated — click to refresh';
+      el.onclick = () => location.reload();
+      document.body.appendChild(el);
+    }
+    el.style.display = 'block';
+  }
+  // Get initial version
+  fetchVersion().then(v => { currentVersion = v; });
+  // Poll every 3 seconds for version changes
+  setInterval(async () => {
+    const v = await fetchVersion();
+    if (v != null && currentVersion != null && v !== currentVersion) {
+      showUpdateNotice();
+    }
+  }, 3000);
+})();
 </script>"""

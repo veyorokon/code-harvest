@@ -114,6 +114,18 @@ def cmd_serve(args):
   """Serve a local web UI and JSON API for a harvest."""
   serve_harvest(args.harvest, args.port)
 
+def cmd_watch(args):
+  """Watch a source directory and incrementally re-harvest on changes."""
+  from .watch import run_watch
+  run_watch(
+    source=args.source,
+    out_json=args.out,
+    debounce_ms=args.debounce_ms,
+    poll=args.poll,
+    include_ext=args.only_ext,
+    exclude_ext=args.skip_ext,
+  )
+
 def main(argv=None) -> int:
   """Main CLI entry point."""
   ap = argparse.ArgumentParser(prog="harvest", description="Reap codebases into portable JSON + chunks; query & serve.")
@@ -157,6 +169,16 @@ def main(argv=None) -> int:
   pv.add_argument("harvest")
   pv.add_argument("--port", type=int, default=8787)
   pv.set_defaults(func=cmd_serve)
+  
+  # watch command
+  pw = sub.add_parser("watch", help="Watch a source directory and incrementally re-harvest on changes")
+  pw.add_argument("source", help="Path to source directory to watch")
+  pw.add_argument("-o", "--out", required=True, help="Output harvest JSON file")
+  pw.add_argument("--debounce-ms", type=int, default=800, help="Debounce time in milliseconds")
+  pw.add_argument("--poll", type=float, default=1.0, help="Polling interval in seconds")
+  pw.add_argument("--only-ext", default=None, help="Comma-separated list of extensions to include (e.g. py,ts,js)")
+  pw.add_argument("--skip-ext", default=None, help="Comma-separated list of extensions to exclude")
+  pw.set_defaults(func=cmd_watch)
   
   args = ap.parse_args(argv)
   

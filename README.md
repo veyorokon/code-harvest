@@ -40,7 +40,7 @@ harvest serve my-codebase.json  # Web UI at http://localhost:8787
 ```bash
 pip install harvest-code
 ```
-
+f
 **Requirements**: Python 3.9+ (no dependencies)
 
 ## Core Commands
@@ -94,6 +94,28 @@ harvest serve output.json --port 8080
 - **Deep Linking**: Share URLs to specific files and line ranges
 - **Saved Views**: Bookmark filtered states for quick access
 - **Mobile Responsive**: Works on desktop, tablet, and mobile
+
+### Live Updates (zero deps)
+
+Keep your harvest JSON fresh while you edit code with the watcher:
+
+```bash
+# Terminal 1: Start watching your source directory
+harvest watch . -o codebase.json --debounce-ms 800 --poll 1.0
+
+# Terminal 2: Serve the UI/API (unchanged)
+harvest serve codebase.json --port 8787
+```
+
+The UI automatically polls `/api/meta` every few seconds. When `metadata.version` changes, it shows an "Updated — click to refresh" button. No Flask, no SSE, no extra dependencies.
+
+**Watch Flags:**
+- `--debounce-ms 800` - Coalesce bursts of file events (milliseconds)
+- `--poll 1.0` - Filesystem snapshot cadence (seconds)  
+- `--only-ext py,ts,js` - Include only specific extensions
+- `--skip-ext log,tmp` - Exclude specific extensions
+
+The watcher uses portable polling that works on all platforms and performs incremental re-harvesting when files change.
 
 ## Output Schema
 

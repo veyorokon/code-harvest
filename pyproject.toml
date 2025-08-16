@@ -16,6 +16,12 @@ classifiers = [
   "Environment :: Console"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-timeout>=2.3"
+]
+
 [project.scripts]
 harvest = "harvest.cli:main"
 
