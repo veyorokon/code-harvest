@@ -12,7 +12,7 @@ harvest reap . -o my-codebase.json
 harvest serve my-codebase.json  # Web UI at http://localhost:8787
 ```
 
-![harvest Web UI](https://raw.githubusercontent.com/veyorokon/code-harvest/main/.github/assets/harvest-web-ui-screenshot.png)
+![harvest Web UI](https://raw.githubusercontent.com/veyorokon/code-harvest/master/.github/assets/harvest-web-ui-screenshot.png)
 
 *Interactive web interface with search, filtering, syntax highlighting, and progressive loading*
 
