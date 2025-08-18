@@ -202,7 +202,8 @@ class FileEntry:
 class HarvestEngine:
   def __init__(self, max_bytes=DEFAULT_MAX_BYTES, max_files=DEFAULT_MAX_FILES, 
                skip_ext=None, skip_files=None, skip_folders=None,
-               path_only_ext=None, apply_default_excludes=True):
+               path_only_ext=None, apply_default_excludes=True,
+               only_ext=None, skip_ext_override=None):
     self.max_bytes = max_bytes
     self.max_files = max_files
     self.skip_ext = skip_ext or DEFAULT_SKIP_EXT
@@ -210,10 +211,23 @@ class HarvestEngine:
     self.skip_folders = skip_folders or DEFAULT_SKIP_FOLDERS
     self.path_only_ext = path_only_ext or DEFAULT_PATH_ONLY_EXT
     self.apply_default_excludes = apply_default_excludes
+    self.only_ext = only_ext  # If set, only include these extensions
+    self.skip_ext_override = skip_ext_override  # Additional extensions to skip
   
   def should_skip_path(self, path: Path) -> bool:
+    ext = path.suffix.lower()
+    
+    # Apply only_ext filter first (if specified)
+    if self.only_ext is not None:
+      if ext not in self.only_ext:
+        return True
+    
+    # Apply skip_ext_override filter
+    if self.skip_ext_override and ext in self.skip_ext_override:
+      return True
+    
     if not self.apply_default_excludes: return False
-    if path.suffix.lower() in self.skip_ext: return True
+    if ext in self.skip_ext: return True
     
     # Skip all hidden files and directories (starting with .)
     for part in path.parts:

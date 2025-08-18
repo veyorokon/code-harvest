@@ -28,10 +28,25 @@ def _write_atomic(path: str, payload: dict, fmt: str = "json") -> None:
 
 def cmd_reap(args):
   """Create a harvest from local dir or GitHub URL."""
+  # Parse extension filters
+  only_ext = None
+  if args.only_ext:
+    only_ext = set(ext.strip().lower() for ext in args.only_ext.split(','))
+    # Ensure extensions start with dot
+    only_ext = {ext if ext.startswith('.') else f'.{ext}' for ext in only_ext}
+  
+  skip_ext = None  
+  if args.skip_ext:
+    skip_ext = set(ext.strip().lower() for ext in args.skip_ext.split(','))
+    # Ensure extensions start with dot
+    skip_ext = {ext if ext.startswith('.') else f'.{ext}' for ext in skip_ext}
+  
   engine = HarvestEngine(
     max_bytes=args.max_bytes,
     max_files=args.max_files,
-    apply_default_excludes=(not args.no_default_excludes)
+    apply_default_excludes=(not args.no_default_excludes),
+    only_ext=only_ext,
+    skip_ext_override=skip_ext
   )
   
   payload = engine.harvest_local(args.target)
@@ -157,6 +172,46 @@ def cmd_sow(args):
   
   print(f"Created {args.react_out}  imports={len(imports)}  exports={len(exported)}")
 
+def _write_markdown_skeleton(fh, items, source_file):
+  """Write skeleton data in Markdown format"""
+  from pathlib import Path
+  from datetime import datetime
+  
+  # Header
+  fh.write(f"# Code Skeleton\n\n")
+  fh.write(f"Generated from: `{Path(source_file).name}`  \n")
+  fh.write(f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n")
+  fh.write(f"Total files: {len(items)}\n\n")
+  
+  # Group by language
+  by_lang = {}
+  for item in items:
+    lang = item.get("language") or "unknown"
+    if lang not in by_lang:
+      by_lang[lang] = []
+    by_lang[lang].append(item)
+  
+  # Write each language section
+  for lang in sorted(by_lang.keys()):
+    files = by_lang[lang]
+    fh.write(f"## {lang.title()} ({len(files)} files)\n\n")
+    
+    for file_item in sorted(files, key=lambda x: x.get("path", "")):
+      path = file_item.get("path", "unknown")
+      text = file_item.get("text", "")
+      
+      if text.strip():
+        fh.write(f"### `{path}`\n\n")
+        
+        # Determine code fence language
+        fence_lang = lang if lang in ["python", "javascript", "typescript"] else ""
+        
+        fh.write(f"```{fence_lang}\n")
+        fh.write(text)
+        if not text.endswith('\n'):
+          fh.write('\n')
+        fh.write("```\n\n")
+
 def cmd_winnow(args):
   """Filter/extract artifacts; --skeleton emits signatures only."""
   payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
@@ -178,14 +233,21 @@ def cmd_winnow(args):
     input_path = Path(args.json)
     # Remove .harvest.json and add skeleton.harvest.ext
     base_name = input_path.name.replace('.harvest.json', '')
-    ext = "jsonl" if args.format == "jsonl" else "json"
+    if args.format == "md":
+      ext = "md"
+    elif args.format == "json":
+      ext = "json"
+    else:
+      ext = "jsonl"
     output_path = f"{base_name}.skeleton.harvest.{ext}"
   
   # emit
   if output_path != "-":  # "-" means stdout
     tmp = Path(output_path + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
-      if args.format == "jsonl":
+      if args.format == "md":
+        _write_markdown_skeleton(fh, out, args.json)
+      elif args.format == "jsonl":
         for row in out:
           fh.write(json.dumps(row, ensure_ascii=False) + "\n")
       else:
@@ -193,7 +255,12 @@ def cmd_winnow(args):
     os.replace(str(tmp), output_path)
     print(f"Wrote {output_path}  items={len(out)}")
   else:
-    if args.format == "jsonl":
+    if args.format == "md":
+      import io
+      buffer = io.StringIO()
+      _write_markdown_skeleton(buffer, out, args.json)
+      print(buffer.getvalue(), end="")
+    elif args.format == "jsonl":
       for row in out:
         print(json.dumps(row, ensure_ascii=False))
     else:
@@ -290,6 +357,8 @@ def main(argv=None) -> int:
                   help="Sections to include: metadata (file info), data (file contents), chunks (parsed symbols)")
   pr.add_argument("--exclude", nargs="+", choices=["metadata", "data", "chunks"],
                   help="Sections to exclude from output")
+  pr.add_argument("--only-ext", help="Include only these file extensions (comma-separated, e.g. .py,.ts,.js)")
+  pr.add_argument("--skip-ext", help="Skip these file extensions (comma-separated)")
   pr.set_defaults(func=cmd_reap)
   
   # query command
@@ -325,7 +394,7 @@ def main(argv=None) -> int:
   pwi.add_argument("--skeleton", action="store_true", help="Emit class/function signatures only (no bodies)")
   pwi.add_argument("--language", help="Filter by language (e.g., python, typescript)")
   pwi.add_argument("--out", help="Output file path (default: <input>.skeleton.harvest.jsonl, use '-' for stdout)")
-  pwi.add_argument("--format", choices=["json","jsonl"], default="jsonl", help="Output format (default: jsonl)")
+  pwi.add_argument("--format", choices=["json","jsonl","md"], default="jsonl", help="Output format: json, jsonl, or md (default: jsonl)")
   pwi.set_defaults(func=cmd_winnow)
   
   # serve command

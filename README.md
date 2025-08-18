@@ -40,7 +40,16 @@ harvest reap . --include data          # File contents only
 harvest reap . --exclude chunks        # Skip code parsing
 harvest reap . --format jsonl          # Line-delimited JSON
 
-# Override filters
+# File type filtering (NEW)
+harvest reap . --only-ext .py          # Only Python files
+harvest reap . --only-ext py,ts,js     # Multiple extensions (dot optional)
+harvest reap . --skip-ext .log,.tmp    # Skip specific types
+
+# Common combinations
+harvest reap . --include data --only-ext .py    # Python source only (for LLMs)
+harvest reap . --include chunks --only-ext .ts  # TypeScript symbols only
+
+# Override default filters
 harvest reap . --no-default-excludes   # Include hidden files, tests, etc.
 ```
 
@@ -99,8 +108,9 @@ harvest winnow data.harvest.json --skeleton --language python  # Python only
 harvest winnow data.harvest.json --skeleton --out custom.jsonl # Custom output
 
 # Output formats
-harvest winnow data.harvest.json --skeleton --format json      # → data.skeleton.harvest.json
 harvest winnow data.harvest.json --skeleton --format jsonl     # → data.skeleton.harvest.jsonl (default)
+harvest winnow data.harvest.json --skeleton --format json      # → data.skeleton.harvest.json
+harvest winnow data.harvest.json --skeleton --format md        # → data.skeleton.harvest.md
 harvest winnow data.harvest.json --skeleton --out -            # Output to stdout
 ```
 
@@ -206,6 +216,14 @@ curl http://localhost:8787/api/harvest
 
 ### RAG/LLM Context
 
+```bash
+# Get clean Python source for LLM context
+harvest reap . --include data --only-ext .py
+
+# Extract API signatures only
+harvest winnow project.harvest.json --skeleton --language python
+```
+
 ```python
 import json
 
@@ -219,6 +237,16 @@ api_functions = [
 ]
 ```
 
+### Documentation Generation
+
+```bash
+# Generate architectural overview in Markdown
+harvest winnow app.harvest.json --skeleton --format md  # → app.skeleton.harvest.md
+
+# Extract all exports
+harvest query app.json --entity files --has-default-export --fields path,exports
+```
+
 ### Code Analysis
 
 ```bash
@@ -227,13 +255,6 @@ harvest query app.json --entity chunks --kind export_default --language typescri
 
 # Find large classes
 harvest query app.json --entity chunks --kind class --min-lines 100
-```
-
-### Documentation Generation
-
-```bash
-# Extract all exports
-harvest query app.json --entity files --has-default-export --fields path,exports
 ```
 
 ## File Naming
