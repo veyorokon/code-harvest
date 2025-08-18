@@ -12,23 +12,33 @@ from .constants import CANON_EXT
 # --- constants / defaults ---
 DEFAULT_MAX_BYTES = 524288
 DEFAULT_MAX_FILES = 5000
+# Skip completely (no paths, no content)
 DEFAULT_SKIP_EXT = {
-  # text/logs & temp
+  # logs & temp (no value in seeing these)
   ".log",".tmp",".temp",".ds_store","_py.html",".coverage",
-  # databases & checkpoints
+  # config files (usually boilerplate)
+  ".ini",".cfg",".conf",".config",".properties",".env",".editorconfig",
+  # databases & checkpoints (binary, huge)
   ".db",".sqlite",".sqlite3",".db-wal",".db-shm",".ckpt",".safetensors",
-  # audio/video
+  # audio/video (binary, huge)
   ".wav",".mp3",".flac",".ogg",".m4a",".mp4",".mov",".avi",".mkv",".webm",
-  # images & fonts
-  ".jpg",".jpeg",".png",".gif",".bmp",".svg",".ico",".tiff",".tif",".webp",".avif",".heic",".ttf",".otf",".woff",".woff2",
-  # archives & bundles
+  # archives & bundles (binary)
   ".zip",".tar",".gz",".rar",".7z",".xz",".bz2",".zst",
-  # binaries & objects
+  # binaries & objects (no source value)
   ".exe",".dll",".so",".dylib",".o",".obj",".a",".lib",".wasm",".pyc",".dat",
-  # misc large
+  # misc large/generated
   ".bak",".dir",".lock",".min.js",".min.css",".map",
-  # notebooks & ML artifacts
+  # notebooks & ML artifacts (often huge/binary)
   ".ipynb",".pt",".onnx",".h5",".pth",".npz",".npy",".pb",".tflite"
+}
+
+# List paths only (no content) - files we want to know exist but don't need content
+DEFAULT_PATH_ONLY_EXT = {
+  # images & fonts (useful to know they exist, but content is binary)
+  ".jpg",".jpeg",".png",".gif",".bmp",".svg",".ico",".tiff",".tif",".webp",".avif",".heic",
+  ".ttf",".otf",".woff",".woff2",
+  # documentation images/assets
+  ".pdf",".doc",".docx",".ppt",".pptx"
 }
 DEFAULT_SKIP_FILES = {
   "index.jsx","index.tsx","__init__.py","harvest.json",
@@ -40,6 +50,9 @@ DEFAULT_SKIP_FOLDERS = {
   ".git",".hg",".svn",
   "htmlcov","dist","build","out","bin","obj","target",
   "migrations",
+  # test directories (often noisy/generated)
+  "tests","test","__tests__","spec","e2e","cypress","playwright",
+  "coverage","test-results","allure-results",
   # caches & tooling
   ".pytest_cache",".mypy_cache",".ruff_cache",".tox",".nox",".cache",".gradle",".ipynb_checkpoints",".dart_tool",".direnv",
   ".vscode",".idea",".next",".expo",".parcel-cache",".turbo",".yarn",".pnp",".nx",".nuxt",".svelte-kit",".angular",
@@ -189,17 +202,23 @@ class FileEntry:
 class HarvestEngine:
   def __init__(self, max_bytes=DEFAULT_MAX_BYTES, max_files=DEFAULT_MAX_FILES, 
                skip_ext=None, skip_files=None, skip_folders=None,
-               apply_default_excludes=True):
+               path_only_ext=None, apply_default_excludes=True):
     self.max_bytes = max_bytes
     self.max_files = max_files
     self.skip_ext = skip_ext or DEFAULT_SKIP_EXT
     self.skip_files = skip_files or DEFAULT_SKIP_FILES
     self.skip_folders = skip_folders or DEFAULT_SKIP_FOLDERS
+    self.path_only_ext = path_only_ext or DEFAULT_PATH_ONLY_EXT
     self.apply_default_excludes = apply_default_excludes
   
   def should_skip_path(self, path: Path) -> bool:
     if not self.apply_default_excludes: return False
     if path.suffix.lower() in self.skip_ext: return True
+    
+    # Skip all hidden files and directories (starting with .)
+    for part in path.parts:
+      if part.startswith('.') and part not in ['.', '..']:
+        return True
     
     # Never index any *.harvest.json file
     if path.name.endswith(CANON_EXT):
@@ -215,46 +234,61 @@ class HarvestEngine:
       if part in self.skip_folders: return True
     return False
   
+  def should_path_only(self, path: Path) -> bool:
+    """Check if this file should be listed but without content"""
+    if not self.apply_default_excludes: return False
+    return path.suffix.lower() in self.path_only_ext
+  
   def process_file(self, path: Path, content: str = None) -> tuple[FileEntry, List[ChunkEntry]]:
-    if content is None:
-      try:
-        content = path.read_text(encoding="utf-8", errors="replace")
-      except Exception:
-        content = ""
+    # Check if this is a path-only file (no content needed)
+    path_only = self.should_path_only(path)
     
-    # Handle truncation
-    truncated = len(content.encode("utf-8")) > self.max_bytes
-    truncated_reason = "size_limit" if truncated else None
-    if truncated:
-      # Truncate but try to end at line boundary
-      byte_content = content.encode("utf-8")[:self.max_bytes]
-      try:
-        content = byte_content.decode("utf-8")
-        # Find last complete line
-        last_newline = content.rfind("\\n")
-        if last_newline > 0:
-          content = content[:last_newline+1]
-      except UnicodeDecodeError:
-        content = byte_content.decode("utf-8", errors="replace")
+    if path_only:
+      # For path-only files, don't read content
+      content = ""
+      truncated = False
+      truncated_reason = "path_only"
+    else:
+      if content is None:
+        try:
+          content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+          content = ""
+      
+      # Handle truncation
+      truncated = len(content.encode("utf-8")) > self.max_bytes
+      truncated_reason = "size_limit" if truncated else None
+      if truncated:
+        # Truncate but try to end at line boundary
+        byte_content = content.encode("utf-8")[:self.max_bytes]
+        try:
+          content = byte_content.decode("utf-8")
+          # Find last complete line
+          last_newline = content.rfind("\\n")
+          if last_newline > 0:
+            content = content[:last_newline+1]
+        except UnicodeDecodeError:
+          content = byte_content.decode("utf-8", errors="replace")
     
     lang = detect_language(str(path))
     
-    # Extract exports/symbols
+    # Extract exports/symbols (skip for path-only files)
     exports = None
     py_symbols = None
-    if lang in ("javascript", "javascriptreact", "typescript", "typescriptreact"):
-      exports = extract_js_ts_exports(content, path.stem)
-    elif lang == "python":
-      py_symbols = extract_py_symbols(content)
+    if not path_only:
+      if lang in ("javascript", "javascriptreact", "typescript", "typescriptreact"):
+        exports = extract_js_ts_exports(content, path.stem)
+      elif lang == "python":
+        py_symbols = extract_py_symbols(content)
     
     # Create file entry
     file_entry = FileEntry(
       name=path.name,
       path=str(path),
-      size=len(content.encode("utf-8")),
+      size=path.stat().st_size if path.exists() else 0,  # Use actual file size for path-only
       mtime=path.stat().st_mtime if path.exists() else 0,
       language=lang,
-      hash=sha256_text(content),
+      hash=sha256_text(content) if content else "",
       truncated=truncated,
       truncated_reason=truncated_reason,
       exports=exports,
@@ -262,29 +296,30 @@ class HarvestEngine:
       content=content
     )
     
-    # Generate chunks
+    # Generate chunks (skip for path-only files)
     chunks = []
-    if lang in ("javascript", "javascriptreact", "typescript", "typescriptreact"):
-      chunk_data = js_ts_chunks(content, str(path))
-    elif lang == "python":
-      chunk_data = py_chunks(content, str(path))
-    else:
-      # Generic file chunk
-      lines = content.splitlines()
-      chunk_data = [{
-        "id": chunk_id(str(path), 1, len(lines)),
-        "file_path": str(path),
-        "language": lang,
-        "kind": "file", 
-        "symbol": path.name,
-        "start_line": 1,
-        "end_line": len(lines),
-        "public": False,
-        "hash": sha256_text(content)
-      }]
-    
-    for chunk in chunk_data:
-      chunks.append(ChunkEntry(**chunk))
+    if not path_only:
+      if lang in ("javascript", "javascriptreact", "typescript", "typescriptreact"):
+        chunk_data = js_ts_chunks(content, str(path))
+      elif lang == "python":
+        chunk_data = py_chunks(content, str(path))
+      else:
+        # Generic file chunk
+        lines = content.splitlines()
+        chunk_data = [{
+          "id": chunk_id(str(path), 1, len(lines)),
+          "file_path": str(path),
+          "language": lang,
+          "kind": "file", 
+          "symbol": path.name,
+          "start_line": 1,
+          "end_line": len(lines),
+          "public": False,
+          "hash": sha256_text(content)
+        }]
+      
+      for chunk in chunk_data:
+        chunks.append(ChunkEntry(**chunk))
     
     return file_entry, chunks
   
