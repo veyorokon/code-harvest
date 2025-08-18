@@ -50,7 +50,7 @@ def cmd_reap(args):
   if "chunks" in include_set:
     filtered_payload["chunks"] = payload.get("chunks", [])
   
-  out = resolve_reap_out(args.out, os.getcwd())
+  out = resolve_reap_out(args.out, args.target)
   
   _write_atomic(out, filtered_payload, fmt=args.format)
   if args.mirror_out:
@@ -196,7 +196,7 @@ def cmd_serve(args):
 def cmd_watch(args):
   """Watch a source directory and incrementally re-harvest on changes."""
   from .watch import run_watch
-  out = resolve_reap_out(args.out, os.getcwd())
+  out = resolve_reap_out(args.out, args.source)
   run_watch(
     source=args.source,
     out_json=out,

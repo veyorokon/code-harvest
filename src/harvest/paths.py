@@ -1,9 +1,24 @@
 import os
-from .constants import CANON_BASENAME
+from pathlib import Path
+from .constants import CANON_BASENAME, CANON_EXT
 
-def resolve_reap_out(user_out: str|None, cwd: str) -> str:
-    """Default output for reap is a visible file in CWD."""
-    return os.path.abspath(user_out or os.path.join(cwd, CANON_BASENAME))
+def resolve_reap_out(user_out: str|None, target: str = None) -> str:
+    """
+    Default output for reap uses directory name as harvest filename.
+    e.g., harvest reap ./some/path/here → ./here.harvest.json (in current working dir)
+    """
+    if user_out:
+        return os.path.abspath(user_out)
+    
+    # If target is provided and is a directory, use its name for the output file
+    if target and os.path.isdir(target):
+        dir_path = Path(target).resolve()
+        dir_name = dir_path.name
+        # Write to current working directory with directory name + .harvest.json
+        return os.path.abspath(f"{dir_name}{CANON_EXT}")
+    
+    # Fallback to default behavior
+    return os.path.abspath(CANON_BASENAME)
 
 def resolve_data_path(arg: str|None, cwd: str) -> str:
     """
