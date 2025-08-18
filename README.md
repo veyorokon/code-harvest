@@ -8,8 +8,7 @@ Harvest codebases into portable JSON + chunks for RAG, tooling, and analysis.
 
 ```bash
 pip install harvest-code
-harvest reap . -o my-codebase.json
-harvest serve my-codebase.json  # Web UI at http://localhost:8787
+harvest serve  # Watches current dir, auto-creates harvest, serves at http://localhost:8787
 ```
 
 ![harvest Web UI](https://raw.githubusercontent.com/veyorokon/code-harvest/master/.github/assets/harvest-web-ui-screenshot.png)
@@ -40,8 +39,24 @@ harvest serve my-codebase.json  # Web UI at http://localhost:8787
 ```bash
 pip install harvest-code
 ```
-f
+
 **Requirements**: Python 3.9+ (no dependencies)
+
+## Harvest file naming & location
+
+- **Canonical extension:** `.harvest.json`
+- **Default location:** `./codebase.harvest.json` (in current directory)
+- The harvester and watcher **automatically ignore** any `*.harvest.json` files to prevent recursive harvesting
+- Legacy filenames (`.hvst.json`, `.har.json`, `.harvest-code.json`) are still supported but the canonical name is recommended
+
+**Tip:** choose whether to commit the index:
+```bash
+# .gitignore (optional - exclude harvest files from git)
+.harvest/
+
+# OR commit them for reproducible runs
+git add .harvest/codebase.harvest.json
+```
 
 ## Core Commands
 
@@ -49,8 +64,17 @@ f
 
 ```bash
 # Basic harvesting
-harvest reap . -o codebase.json
-harvest reap /path/to/project -o output.json
+harvest reap .  # Creates ./codebase.harvest.json
+harvest reap /path/to/project  # Creates /path/to/project/codebase.harvest.json
+
+# Custom output path
+harvest reap . -o my-custom-harvest.json
+
+# Control what's included
+harvest reap . --include data          # Only file contents, no chunks
+harvest reap . --include metadata data  # Metadata + data, no chunks  
+harvest reap . --exclude chunks        # Everything except chunks
+harvest reap . --include chunks         # Only chunks (for analysis)
 
 # With size limits
 harvest reap . --max-files 1000 --max-bytes 512000
@@ -62,8 +86,8 @@ harvest reap . --no-default-excludes -o full-harvest.json
 ### Harvest from GitHub
 
 ```bash
-harvest reap https://github.com/user/repo -o repo.json
-harvest reap https://github.com/user/repo/tree/main/src -o src-only.json
+harvest reap https://github.com/user/repo -o repo.harvest.json
+harvest reap https://github.com/user/repo/tree/main/src -o src-only.harvest.json
 ```
 
 ### Query & Filter  
@@ -83,31 +107,46 @@ harvest query output.json --entity chunks --kind export_default --language types
 ### Interactive Web Interface
 
 ```bash
-harvest serve output.json --port 8080
-# Browse at http://localhost:8080
+harvest serve                    # Watch + serve current directory (default)
+harvest serve /path/to/project    # Watch + serve specific directory
+harvest serve --no-watch          # Serve without watching for changes
+harvest serve --port 8080         # Use custom port
 ```
 
 **Web UI Features:**
 - **Search & Filter**: Real-time filtering by language, path, symbols
-- **Syntax Highlighting**: Toggle-able code highlighting for 10+ languages  
+- **Syntax Highlighting**: Code highlighting enabled by default with dropdown toggle (Highlight/Plain)
+- **Auto-refresh**: Seamless updates when files change in watch mode
 - **Progressive Loading**: Infinite scroll for large datasets
 - **Deep Linking**: Share URLs to specific files and line ranges
 - **Saved Views**: Bookmark filtered states for quick access
 - **Mobile Responsive**: Works on desktop, tablet, and mobile
 
-### Live Updates (zero deps)
+### Live Updates (auto-refresh, zero deps)
 
-Keep your harvest JSON fresh while you edit code with the watcher:
+`harvest serve` now includes watching by default - no need for separate terminals!
 
 ```bash
-# Terminal 1: Start watching your source directory
-harvest watch . -o codebase.json --debounce-ms 800 --poll 1.0
+# Single command for watch + serve (recommended)
+harvest serve
 
-# Terminal 2: Serve the UI/API (unchanged)
-harvest serve codebase.json --port 8787
+# Or run them separately if needed
+harvest watch .                   # Terminal 1: Watch only
+harvest serve --no-watch          # Terminal 2: Serve only
 ```
 
-The UI automatically polls `/api/meta` every few seconds. When `metadata.version` changes, it shows an "Updated — click to refresh" button. No Flask, no SSE, no extra dependencies.
+The UI polls `/api/meta` every 3 seconds and automatically refreshes when files change:
+- Updates the file list and metadata instantly
+- Refreshes the content preview without manual clicking
+- Maintains your scroll position and selection
+- Shows progress in browser console (`[harvest]` logs) for debugging
+
+All API endpoints send `Cache-Control: no-store` headers to prevent stale data, and the UI includes version parameters for cache busting.
+
+**New endpoint:**
+```
+GET /api/harvest                # returns the current JSON, uncached, with ETag
+```
 
 **Watch Flags:**
 - `--debounce-ms 800` - Coalesce bursts of file events (milliseconds)
@@ -116,6 +155,27 @@ The UI automatically polls `/api/meta` every few seconds. When `metadata.version
 - `--skip-ext log,tmp` - Exclude specific extensions
 
 The watcher uses portable polling that works on all platforms and performs incremental re-harvesting when files change.
+
+## Output Control
+
+You can control what's included in the harvest output:
+
+- **`--include metadata data`** - Just files and metadata (faster, smaller)
+- **`--include data`** - Just file contents (minimal output)  
+- **`--exclude chunks`** - Skip chunk generation (useful for simple file archiving)
+- **`--include chunks`** - Just chunks (for code analysis without full content)
+
+Common use cases:
+```bash
+# Fast file inventory without content
+harvest reap . --include metadata
+
+# Full content without chunking overhead  
+harvest reap . --exclude chunks
+
+# Just chunks for LLM context
+harvest reap . --include chunks --format jsonl
+```
 
 ## Output Schema
 

@@ -9,6 +9,8 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
   table{border-collapse:collapse;width:100%}
   td,th{border-bottom:1px solid #eee;padding:6px 8px;text-align:left}
   tr:hover{background:#fafafa}
+  tr.active{background:#e8f4ff}
+  tr.active:hover{background:#deedff}
   pre{background:#0b1020;color:#e6e6e6;padding:12px;border-radius:8px;overflow:auto;white-space:pre}
   #pane{position:sticky;top:60px;height:calc(100vh - 88px)}
   .highlight-toggle{margin-left:8px;font-size:12px}
@@ -41,7 +43,7 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
     <div>
       <input id=q placeholder="symbol regex (chunks) or path regex (files)">
       <select id=entity><option>chunks</option><option>files</option></select>
-      <select id=lang><option value="">language</option><option>python</option><option>javascript</option><option>javascriptreact</option><option>typescript</option><option>typescriptreact</option></select>
+      <select id=lang><option value="">all</option><option>python</option><option>javascript</option><option>javascriptreact</option><option>typescript</option><option>typescriptreact</option></select>
       <button id=copyLink class="button">Copy link</button>
       <button id=export class="button right">Export JSONL</button>
       <button id=saveView class="button">Save view</button>
@@ -56,7 +58,12 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
     </div>
   </div>
   <aside id=pane>
-    <div class="muted">Preview <button id="highlightToggle" class="button highlight-toggle">Highlight</button></div>
+    <div class="muted">Preview 
+      <select id="highlightToggle" class="button highlight-toggle">
+        <option value="highlight">Highlight</option>
+        <option value="plain">Plain</option>
+      </select>
+    </div>
     <pre id=code>(click a chunk row)</pre>
   </aside>
 </main>
@@ -74,7 +81,7 @@ const shorten = (s, head=8, tail=6) => !s ? "" : (s.length <= head+tail+1 ? s : 
 const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch {} }
 
 let __meta = null;
-let highlightEnabled = false;
+let highlightEnabled = true;  // Default to highlighting on
 
 // Lightweight syntax highlighter
 function highlightCode(code, language) {
@@ -182,11 +189,9 @@ function displayCode(content, language) {
   }
 }
 
-function toggleHighlight() {
-  highlightEnabled = !highlightEnabled;
-  const btn = document.getElementById('highlightToggle');
-  btn.textContent = highlightEnabled ? 'Plain' : 'Highlight';
-  btn.style.backgroundColor = highlightEnabled ? '#e6f3ff' : '';
+function updateHighlight() {
+  const select = document.getElementById('highlightToggle');
+  highlightEnabled = select.value === 'highlight';
   
   // Re-render current content
   const codeEl = document.getElementById('code');
@@ -247,7 +252,7 @@ function writeURL(s){
 }
 
 async function meta(){
-  const r=await fetch('api/meta'); const j=await r.json();
+  const r=await fetch('/api/meta'); const j=await r.json();
   __meta = j;
   document.getElementById('meta').textContent = j.source.type + ' · ' + j.created_at + ' · files=' + j.counts.total_files;
   
@@ -291,7 +296,7 @@ async function search(append = false){
   const entity=document.getElementById('entity').value;
   const q=document.getElementById('q').value;
   const lang=document.getElementById('lang').value;
-  const url=new URL('api/search', location.href);
+  const url=new URL('/api/search', location.href);
   url.searchParams.set('entity', entity);
   if(q) url.searchParams.set(entity==='chunks' ? 'symbol_regex':'path_regex', q);
   if(lang) url.searchParams.set('language', lang);
@@ -355,7 +360,7 @@ async function search(append = false){
     if (s.dlPath && !append) {
       const start = parseInt(s.dlStart||"1"), end = parseInt(s.dlEnd||"0");
       try {
-        const r2 = await fetch(`api/file?path=${encodeURIComponent(s.dlPath)}&start=${start}&end=${end > 0 ? end : ''}`);
+        const r2 = await fetch(`/api/file?path=${encodeURIComponent(s.dlPath)}&start=${start}&end=${end > 0 ? end : ''}`);
         const j2 = await r2.json();
         // Convert escaped newlines to actual newlines
         const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
@@ -438,18 +443,26 @@ function renderTable() {
       }
     }
     const tr = e.target.closest('tr'); if (!tr) return;
-    const entity = document.getElementById('entity').value;
     
-    // Get file path - for chunks use data-file, for files use first cell content (path)
-    const fp = entity === 'chunks' ? tr.dataset.file : (tr.querySelector('td')?.textContent || "");
+    // Mark this row as active
+    document.querySelectorAll('#results tbody tr.active').forEach(el => el.classList.remove('active'));
+    tr.classList.add('active');
+    
+    // Get file path consistently from data-file for both chunks and files
+    const fp = tr.dataset.file;
     if (!fp) return;
+    
+    // Track the selected file for persistence across refreshes
+    lastActiveFile = fp;
+    
+    const entity = document.getElementById('entity').value;
     
     // For chunks, use line range; for files, show entire file
     const start = entity === 'chunks' ? parseInt(tr.dataset.start||"1") : 1;
     const end = entity === 'chunks' ? parseInt(tr.dataset.end||"0") : 0;
     
     try {
-      const r2 = await fetch(`api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}`);
+      const r2 = await fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}`);
       const j2 = await r2.json();
       // Convert escaped newlines to actual newlines
       const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
@@ -534,8 +547,22 @@ function deleteCurrentView(){
   if (confirm(`Delete view "${view.name}"?`)) {
     const newList = list.filter(v => v.id !== selectedId);
     storeViews(newList);
+    
+    // Return to default view: clear all filters and refresh
     sel.value = ''; // clear selection
+    
+    // Clear all filter inputs to return to default state
+    $('#q').value = '';
+    $('#lang').value = '';
+    $('#entity').value = 'files';
+    $('#showTech').checked = false;
+    
+    // Update the dropdown to remove deleted view
     refreshViews();
+    
+    // Update URL and refresh the display with cleared filters
+    writeURL(getState());
+    resetAndSearch();
   }
 }
 $('#saveView').onclick = saveCurrentView;
@@ -549,11 +576,11 @@ $('#views').onchange = (e)=>{
 refreshViews();
 
 // Reset progressive state on new searches
-function resetAndSearch() {
+async function resetAndSearch() {
   allRows = [];
   hasMore = false;
   nextCursor = null;
-  search();
+  return search();  // Return the Promise so await actually waits
 }
 
 // hydrate from URL, then render
@@ -568,7 +595,7 @@ document.getElementById('showTech').onchange = resetAndSearch;
 document.getElementById('entity').onchange = ()=>{ writeURL(getState()); resetAndSearch(); };
 document.getElementById('lang').onchange = ()=>{ writeURL(getState()); resetAndSearch(); };
 document.getElementById('copyLink').onclick = ()=> copy(location.href);
-document.getElementById('highlightToggle').onclick = toggleHighlight;
+document.getElementById('highlightToggle').onchange = updateHighlight;
 document.getElementById('export').onclick = ()=>{
   const s = getState();
   const params = stateToParams(s);
@@ -576,11 +603,12 @@ document.getElementById('export').onclick = ()=>{
   const baseCols = (s.entity==='chunks') ? ["id","file_path","symbol","kind","start_line","end_line","language","public","hash"] : ["path","name","language","size","hash"];
   params.set('entity', s.entity);
   params.set('fields', baseCols.join(','));
-  const url = 'api/export?' + params.toString();
+  const url = '/api/export?' + params.toString();
   window.open(url, "_blank");
 };
 // hotkeys & palette
 let selIndex = 0;
+let lastActiveFile = null;  // Track selected file across refreshes
 function rows(){ return Array.from(document.querySelectorAll('#results tbody tr')); }
 function select(i){
   const r = rows(); if (!r.length) return;
@@ -592,7 +620,7 @@ function openPreview(){
   const r = rows()[selIndex]; if(!r) return;
   if ($('#entity').value !== 'chunks') return;
   const fp = r.dataset.file, start = parseInt(r.dataset.start||"1"), end = parseInt(r.dataset.end||"0");
-  fetch(`api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end}`).then(r=>r.json()).then(j=>{
+  fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end}`).then(r=>r.json()).then(j=>{
     // Convert escaped newlines to actual newlines
     const content = (j.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
     displayCode(content, getCurrentLanguage());
@@ -634,6 +662,8 @@ $('#palQ')?.addEventListener('input', (e)=> renderPalette(e.target.value));
 // Version polling for live updates (watch mode support)
 (function(){
   let currentVersion = null;
+  const LOOP_GUARD_KEY = 'harvest:lastReloadV';
+
   async function fetchVersion() {
     try {
       const r = await fetch('/api/meta', { cache: 'no-store' });
@@ -641,26 +671,124 @@ $('#palQ')?.addEventListener('input', (e)=> renderPalette(e.target.value));
       return j.version || 0;
     } catch { return null; }
   }
-  function showUpdateNotice() {
-    let el = document.getElementById('harvest-update-tip');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'harvest-update-tip';
-      el.style.cssText = 'position:fixed;right:12px;bottom:12px;padding:8px 12px;background:#ffd24d;border-radius:8px;font:13px/1.2 system-ui;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.1);z-index:1000';
-      el.textContent = 'Updated — click to refresh';
-      el.onclick = () => location.reload();
-      document.body.appendChild(el);
+  
+  async function autoRefresh(nextV){
+    // Loop guard: if we already reloaded to this exact version, don't loop.
+    const url = new URL(window.location.href);
+    const last = sessionStorage.getItem(LOOP_GUARD_KEY);
+    if (String(nextV) === url.searchParams.get('v') && String(nextV) === last) return;
+
+    // Soft reload hook if the UI supports hot-swapping data
+    if (window.__harvestReload__ && typeof window.__harvestReload__ === 'function') {
+      try { await window.__harvestReload__(nextV); sessionStorage.setItem(LOOP_GUARD_KEY, String(nextV)); return; } catch {}
     }
-    el.style.display = 'block';
+    // Hard reload with deterministic cache-busting (replace, not push)
+    url.searchParams.set('v', String(nextV));
+    sessionStorage.setItem(LOOP_GUARD_KEY, String(nextV));
+    window.location.replace(url.toString());
   }
-  // Get initial version
-  fetchVersion().then(v => { currentVersion = v; });
-  // Poll every 3 seconds for version changes
+
+  // Implement soft reload to refresh data without page reload
+  window.__harvestReload__ = async function(nextV) {
+    console.log(`[harvest] Auto-refresh triggered: version ${currentVersion} → ${nextV}`);
+    
+    // Update version in URL without triggering navigation
+    const url = new URL(window.location.href);
+    url.searchParams.set('v', String(nextV));
+    window.history.replaceState({}, '', url.toString());
+    
+    // Remember what was selected before refresh
+    const previousSelection = lastActiveFile || document.querySelector('tr.active')?.dataset.file;
+    
+    // Force refresh of metadata first
+    console.log('[harvest] Fetching fresh metadata...');
+    await meta();
+    
+    // Re-fetch and update the data
+    console.log('[harvest] Refreshing file list...');
+    await resetAndSearch();
+    
+    // Restore selection and refresh content
+    if (previousSelection) {
+      console.log(`[harvest] Restoring selection: ${previousSelection}`);
+      
+      // Find the row with the same file after refresh
+      const rows = Array.from(document.querySelectorAll('#results tbody tr'));
+      
+      const matchingRow = rows.find(r => {
+        return r.dataset.file === previousSelection;
+      });
+      
+      if (matchingRow) {
+        // Mark it as active and manually fetch fresh content instead of clicking
+        matchingRow.classList.add('active');
+        
+        // Get file info
+        const entity = document.getElementById('entity').value;
+        const fp = matchingRow.dataset.file;
+        const start = entity === 'chunks' ? parseInt(matchingRow.dataset.start||"1") : 1;
+        const end = entity === 'chunks' ? parseInt(matchingRow.dataset.end||"0") : 0;
+        
+        // Force fresh fetch with version cache buster
+        console.log(`[harvest] Force refreshing content for: ${fp} (v${nextV})`);
+        fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}&v=${nextV}`)
+          .then(r => r.json())
+          .then(j => {
+            const content = (j.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
+            console.log(`[harvest] GOT CONTENT (${content.length} chars):`, content.substring(0, 100) + '...');
+            
+            // Get current content to compare
+            const currentContent = document.getElementById('code').textContent || document.getElementById('code').innerText;
+            console.log(`[harvest] CURRENT CONTENT (${currentContent.length} chars):`, currentContent.substring(0, 100) + '...');
+            
+            if (content === currentContent) {
+              console.warn('[harvest] ⚠️ CONTENT IS IDENTICAL - NO CHANGE DETECTED');
+            } else {
+              console.log('[harvest] ✅ CONTENT IS DIFFERENT - UPDATING DISPLAY');
+            }
+            
+            displayCode(content, getCurrentLanguage());
+            console.log('[harvest] Content force-refreshed successfully');
+          })
+          .catch(e => {
+            console.error('[harvest] Error force-refreshing content:', e);
+          });
+        
+        console.log('[harvest] Selection restored and content refreshed');
+      } else {
+        console.log('[harvest] Previous selection no longer exists');
+      }
+    }
+    
+    console.log('[harvest] Auto-refresh complete');
+  };
+
+  // Initialize currentVersion from server, then poll
+  fetchVersion().then(v => { 
+    currentVersion = v;
+    console.log(`[harvest] Initial version: ${v}`);
+  });
   setInterval(async () => {
     const v = await fetchVersion();
     if (v != null && currentVersion != null && v !== currentVersion) {
-      showUpdateNotice();
+      console.log(`[harvest] Version change detected: ${currentVersion} → ${v}`);
+      currentVersion = v;
+      await autoRefresh(v);
     }
   }, 3000);
+
+  // Wrap fetch to include cache busting for API calls
+  const _fetch = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    try {
+      const u = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+      if (u.pathname.startsWith('/api/')) {
+        if (currentVersion != null) u.searchParams.set('v', String(currentVersion));
+        init = Object.assign({ cache: 'no-store' }, init || {});
+        input = u.toString();
+      }
+    } catch {}
+    return _fetch(input, init);
+  };
 })();
 </script>"""

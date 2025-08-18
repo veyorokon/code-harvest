@@ -4,6 +4,7 @@ from __future__ import annotations
 import os, time, json, threading
 from typing import Dict, Tuple, List, Optional, Callable
 from pathlib import Path
+from .constants import CANON_EXT
 
 IGNORED_DIRS = {".git", ".hg", ".svn", "__pycache__", ".idea", ".vscode", ".tox", "node_modules", "dist", "build"}
 IGNORED_FILES = {
@@ -19,6 +20,11 @@ def _filter_ext(path: str, only: Optional[set], skip: Optional[set]) -> bool:
     
     # Check if file should be ignored
     filename = os.path.basename(path)
+    
+    # Hard ignore of canonical harvest files regardless of include/skip
+    if filename.endswith(CANON_EXT):
+        return False
+    
     if filename in IGNORED_FILES:
         return False
     if any(filename.startswith(pattern) or filename.endswith(pattern) for pattern in IGNORED_PATTERNS):
@@ -67,7 +73,7 @@ def _bump_version(payload: dict) -> int:
     meta["generated_at"] = int(time.time())
     return v
 
-def _incremental_reharvest(prev_payload: dict, changed_paths: List[str]) -> dict:
+def _incremental_reharvest(prev_payload: dict, changed_paths: List[str], current_snapshot: Dict[str, Tuple[int, int]]) -> dict:
     """
     Attempt incremental re-harvest of changed paths.
     Falls back to returning previous payload if incremental not available.
@@ -75,6 +81,18 @@ def _incremental_reharvest(prev_payload: dict, changed_paths: List[str]) -> dict
     try:
         # Try to import and use incremental harvesting if available
         from .core import HarvestEngine
+        
+        # Get current file set from snapshot
+        current_files = set(current_snapshot.keys())
+        
+        # Get previous file set from harvest data
+        prev_files = {entry["path"] for entry in prev_payload.get("data", [])}
+        
+        # Determine what changed
+        deleted_files = prev_files - current_files
+        
+        if deleted_files:
+            print(f"[harvest] removing deleted files: {sorted(list(deleted_files))[:3]}{' (+more)' if len(deleted_files) > 3 else ''}")
         
         # Extract previous settings from metadata
         meta = prev_payload.get("metadata", {})
@@ -88,6 +106,17 @@ def _incremental_reharvest(prev_payload: dict, changed_paths: List[str]) -> dict
         # In a more sophisticated implementation, this would only re-process changed files
         new_payload = engine.harvest_local(root)
         
+        # Calculate deltas
+        old_count = len(prev_payload.get("data", []))
+        new_count = len(new_payload.get("data", []))
+        
+        # Update metadata with delta information
+        new_payload["metadata"]["delta"] = {
+            "added": max(0, new_count - old_count) if not deleted_files else 0,
+            "removed": len(deleted_files),
+            "changed": len([p for p in changed_paths if p in current_files])
+        }
+        
         # Preserve any custom metadata fields
         new_payload["metadata"].update({
             k: v for k, v in meta.items() 
@@ -96,6 +125,10 @@ def _incremental_reharvest(prev_payload: dict, changed_paths: List[str]) -> dict
         
         return new_payload
         
+    except FileNotFoundError as e:
+        # Handle case where files are temporarily missing (editor operations)
+        print(f"[harvest] file temporarily unavailable: {e.filename or 'unknown'} (retrying next cycle)")
+        return prev_payload
     except Exception as e:
         print(f"[harvest] incremental error: {e!r} (keeping previous state)")
         return prev_payload
@@ -131,7 +164,8 @@ def run_watch(source: str, out_json: str, debounce_ms: int, poll: float,
     # Initial harvest if file doesn't exist
     if not os.path.exists(out_json):
         print(f"[harvest] initial harvest of {source}")
-        payload = _incremental_reharvest(payload, [])
+        initial_snapshot = _snapshot(source, only, skip, set())
+        payload = _incremental_reharvest(payload, [], initial_snapshot)
         _bump_version(payload)
         _write_atomic(out_json, payload)
         print(f"[harvest] created {out_json}")
@@ -176,7 +210,7 @@ def run_watch(source: str, out_json: str, debounce_ms: int, poll: float,
                 last_fire = now
                 
                 try:
-                    payload = _incremental_reharvest(payload, paths)
+                    payload = _incremental_reharvest(payload, paths, cur)
                     ver = _bump_version(payload)
                     _write_atomic(out_json, payload)
                     print(f"[harvest] updated {out_json} → v{ver} ({len(paths)} files)")

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 from urllib.parse import urlparse
 import urllib.request
+from .constants import CANON_EXT
 
 # --- constants / defaults ---
 DEFAULT_MAX_BYTES = 524288
@@ -199,6 +200,11 @@ class HarvestEngine:
   def should_skip_path(self, path: Path) -> bool:
     if not self.apply_default_excludes: return False
     if path.suffix.lower() in self.skip_ext: return True
+    
+    # Never index any *.harvest.json file
+    if path.name.endswith(CANON_EXT):
+      return True
+    
     if path.name in self.skip_files: return True
     # Skip harvest.json pattern files
     if path.name.endswith('.harvest.json'): return True
