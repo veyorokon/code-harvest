@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse, json, fnmatch, re, sys, os
 from pathlib import Path
 from .paths import resolve_reap_out, resolve_data_path
-from .core import HarvestEngine, DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, detect_language
+from .core import HarvestEngine, DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, detect_language, render_skeleton
 from .server import serve_harvest
 
 def _write_atomic(path: str, payload: dict, fmt: str = "json") -> None:
@@ -157,6 +157,48 @@ def cmd_sow(args):
   
   print(f"Created {args.react_out}  imports={len(imports)}  exports={len(exported)}")
 
+def cmd_winnow(args):
+  """Filter/extract artifacts; --skeleton emits signatures only."""
+  payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
+  out = []
+  want_lang = (args.language or "").strip().lower() or None
+  
+  for f in payload.get("data", []):
+    path = f.get("path")
+    lang = (f.get("language") or "").lower()
+    if want_lang and lang != want_lang:
+      continue
+    text = f.get("content") or ""
+    skel = render_skeleton(lang, text) if args.skeleton else text
+    out.append({"path": path, "language": f.get("language"), "text": skel})
+  
+  # Generate default output filename if not specified
+  output_path = args.out
+  if not output_path:
+    input_path = Path(args.json)
+    # Remove .harvest.json and add skeleton.harvest.ext
+    base_name = input_path.name.replace('.harvest.json', '')
+    ext = "jsonl" if args.format == "jsonl" else "json"
+    output_path = f"{base_name}.skeleton.harvest.{ext}"
+  
+  # emit
+  if output_path != "-":  # "-" means stdout
+    tmp = Path(output_path + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+      if args.format == "jsonl":
+        for row in out:
+          fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+      else:
+        json.dump({"skeletons": out}, fh, indent=2, ensure_ascii=False)
+    os.replace(str(tmp), output_path)
+    print(f"Wrote {output_path}  items={len(out)}")
+  else:
+    if args.format == "jsonl":
+      for row in out:
+        print(json.dumps(row, ensure_ascii=False))
+    else:
+      print(json.dumps({"skeletons": out}, ensure_ascii=False))
+
 def cmd_serve(args):
   """Serve a local web UI with live updates (watch + serve by default)."""
   # Watch mode is now the default, use --no-watch to disable
@@ -275,6 +317,16 @@ def main(argv=None) -> int:
   ps.add_argument("json", help="Path to harvest JSON file")
   ps.add_argument("--react", dest="react_out", help="Generate React barrel file at this path")
   ps.set_defaults(func=cmd_sow)
+  
+  # winnow command
+  pwi = sub.add_parser("winnow", help="Filter and extract code skeletons.",
+                       description="Extract class/function signatures without bodies for architectural overview.")
+  pwi.add_argument("json", help="Path to harvest JSON file")
+  pwi.add_argument("--skeleton", action="store_true", help="Emit class/function signatures only (no bodies)")
+  pwi.add_argument("--language", help="Filter by language (e.g., python, typescript)")
+  pwi.add_argument("--out", help="Output file path (default: <input>.skeleton.harvest.jsonl, use '-' for stdout)")
+  pwi.add_argument("--format", choices=["json","jsonl"], default="jsonl", help="Output format (default: jsonl)")
+  pwi.set_defaults(func=cmd_winnow)
   
   # serve command
   pv = sub.add_parser("serve", help="Start web UI with live updates (default mode).",

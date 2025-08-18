@@ -60,6 +60,7 @@ harvest serve --only-ext py,ts   # Watch specific file types
 **Web UI Features:**
 - Real-time search and filtering
 - Syntax highlighting with toggle
+- **Skeleton view** - Show only function/class signatures
 - Auto-refresh on file changes
 - Infinite scroll for large codebases
 - Deep linking to specific files/lines
@@ -87,6 +88,20 @@ harvest watch . --only-ext py,js,ts    # Specific extensions
 ```bash
 # Create React barrel exports
 harvest sow data.json --react src/index.ts
+```
+
+### `harvest winnow` - Extract code skeletons
+
+```bash
+# Extract function/class signatures without bodies
+harvest winnow data.harvest.json --skeleton                    # → data.skeleton.harvest.jsonl
+harvest winnow data.harvest.json --skeleton --language python  # Python only
+harvest winnow data.harvest.json --skeleton --out custom.jsonl # Custom output
+
+# Output formats
+harvest winnow data.harvest.json --skeleton --format json      # → data.skeleton.harvest.json
+harvest winnow data.harvest.json --skeleton --format jsonl     # → data.skeleton.harvest.jsonl (default)
+harvest winnow data.harvest.json --skeleton --out -            # Output to stdout
 ```
 
 ## Output Structure

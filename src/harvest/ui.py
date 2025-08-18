@@ -59,6 +59,10 @@ SERVE_HTML = """<!doctype html><meta charset=utf-8><title>Harvest</title>
   </div>
   <aside id=pane>
     <div class="muted">Preview 
+      <select id="viewToggle" class="button highlight-toggle">
+        <option value="content">Content</option>
+        <option value="skeleton">Skeleton</option>
+      </select>
       <select id="highlightToggle" class="button highlight-toggle">
         <option value="highlight">Highlight</option>
         <option value="plain">Plain</option>
@@ -79,6 +83,7 @@ const $ = sel => document.querySelector(sel);
 const debounce = (fn, ms=200) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); } };
 const shorten = (s, head=8, tail=6) => !s ? "" : (s.length <= head+tail+1 ? s : s.slice(0,head)+"…"+s.slice(-tail));
 const copy = async (text) => { try { await navigator.clipboard.writeText(text); } catch {} }
+const getSkelParam = () => document.getElementById('viewToggle')?.value === 'skeleton' ? '&skeleton=1' : '';
 
 let __meta = null;
 let highlightEnabled = true;  // Default to highlighting on
@@ -360,7 +365,7 @@ async function search(append = false){
     if (s.dlPath && !append) {
       const start = parseInt(s.dlStart||"1"), end = parseInt(s.dlEnd||"0");
       try {
-        const r2 = await fetch(`/api/file?path=${encodeURIComponent(s.dlPath)}&start=${start}&end=${end > 0 ? end : ''}`);
+        const r2 = await fetch(`/api/file?path=${encodeURIComponent(s.dlPath)}&start=${start}&end=${end > 0 ? end : ''}${getSkelParam()}`);
         const j2 = await r2.json();
         // Convert escaped newlines to actual newlines
         const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
@@ -462,7 +467,7 @@ function renderTable() {
     const end = entity === 'chunks' ? parseInt(tr.dataset.end||"0") : 0;
     
     try {
-      const r2 = await fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}`);
+      const r2 = await fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}${getSkelParam()}`);
       const j2 = await r2.json();
       // Convert escaped newlines to actual newlines
       const content = (j2.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
@@ -596,6 +601,11 @@ document.getElementById('entity').onchange = ()=>{ writeURL(getState()); resetAn
 document.getElementById('lang').onchange = ()=>{ writeURL(getState()); resetAndSearch(); };
 document.getElementById('copyLink').onclick = ()=> copy(location.href);
 document.getElementById('highlightToggle').onchange = updateHighlight;
+document.getElementById('viewToggle').onchange = () => {
+  // Re-fetch and display current selection with new view mode
+  const activeRow = document.querySelector('tr.active');
+  if (activeRow) activeRow.click();
+};
 document.getElementById('export').onclick = ()=>{
   const s = getState();
   const params = stateToParams(s);
@@ -620,7 +630,7 @@ function openPreview(){
   const r = rows()[selIndex]; if(!r) return;
   if ($('#entity').value !== 'chunks') return;
   const fp = r.dataset.file, start = parseInt(r.dataset.start||"1"), end = parseInt(r.dataset.end||"0");
-  fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end}`).then(r=>r.json()).then(j=>{
+  fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end}${getSkelParam()}`).then(r=>r.json()).then(j=>{
     // Convert escaped newlines to actual newlines
     const content = (j.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');
     displayCode(content, getCurrentLanguage());
@@ -731,7 +741,7 @@ $('#palQ')?.addEventListener('input', (e)=> renderPalette(e.target.value));
         
         // Force fresh fetch with version cache buster
         console.log(`[harvest] Force refreshing content for: ${fp} (v${nextV})`);
-        fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}&v=${nextV}`)
+        fetch(`/api/file?path=${encodeURIComponent(fp)}&start=${start}&end=${end > 0 ? end : ''}&v=${nextV}${getSkelParam()}`)
           .then(r => r.json())
           .then(j => {
             const content = (j.text || '(no content available for this file)').replace(/\\\\n/g, '\\n');

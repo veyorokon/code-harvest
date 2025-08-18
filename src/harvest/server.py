@@ -5,6 +5,7 @@ import json, re, fnmatch, os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 from .ui import SERVE_HTML
+from .core import render_skeleton
 
 class ServeState:
   def __init__(self, payload, harvest_path=None):
@@ -198,6 +199,7 @@ def make_handler(state: ServeState):
         start = int(qs.get("start", ["1"])[0])
         end_param = qs.get("end", [""])[0]
         end = int(end_param) if end_param else 0
+        want_skel = qs.get("skeleton", ["0"])[0] in ("1","true","yes")
         
         if not file_path:
           self.send_response(400)
@@ -225,7 +227,13 @@ def make_handler(state: ServeState):
           # From start to end of file
           selected_lines = lines[start-1:]
         
-        result_text = "\\n".join(selected_lines)
+        result_text = "\n".join(selected_lines)
+        
+        # Optional: render skeleton view instead of raw content
+        if want_skel:
+          lang = file_data.get("language")
+          result_text = render_skeleton(lang, result_text)
+        
         self.send_json({
           "path": file_path,
           "start": start,

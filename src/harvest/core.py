@@ -380,3 +380,131 @@ class HarvestEngine:
       "data": files,
       "chunks": chunks
     }
+
+# -----------------------------
+# Skeleton rendering (deterministic)
+# -----------------------------
+def render_python_skeleton(src: str) -> str:
+  """
+  Return only decorators, class/def signatures, and pass/docstring stubs.
+  Deterministic: no formatting randomness; stable ordering as in source.
+  """
+  try:
+    tree = ast.parse(src)
+  except SyntaxError:
+    # Fallback: best-effort header grep
+    headers = []
+    decos = []
+    for line in src.splitlines():
+      if line.lstrip().startswith("@"):
+        decos.append(line.rstrip())
+      elif re.match(r"^\s*(class|def)\s+\w+", line):
+        headers.extend(decos); decos = []
+        headers.append(line.split(":")[0].rstrip()+":")
+    headers.extend(decos)
+    return "\n".join(headers)
+
+  lines = src.splitlines()
+  out = []
+  class _V(ast.NodeVisitor):
+    def _decos(self, node):
+      # Pull raw decorator lines from source via lineno
+      for d in getattr(node, "decorator_list", []):
+        # approximate: take the line where decorator starts
+        ln = getattr(d, "lineno", None)
+        if ln and 1 <= ln <= len(lines):
+          out.append(lines[ln-1].rstrip())
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+      self._decos(node)
+      # Build argument list with type annotations
+      args = []
+      for i, arg in enumerate(node.args.args):
+        arg_str = arg.arg
+        if arg.annotation:
+          try:
+            arg_str += f": {ast.unparse(arg.annotation)}"
+          except:
+            pass
+        args.append(arg_str)
+      args_str = ", ".join(args)
+      
+      # Add return type if present
+      ret_str = ""
+      if node.returns:
+        try:
+          ret_str = f" -> {ast.unparse(node.returns)}"
+        except:
+          pass
+      
+      sig = f"def {node.name}({args_str}){ret_str}:"
+      out.append(sig)
+      self.generic_visit(node)
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+      self._decos(node)
+      # Build argument list with type annotations
+      args = []
+      for i, arg in enumerate(node.args.args):
+        arg_str = arg.arg
+        if arg.annotation:
+          try:
+            arg_str += f": {ast.unparse(arg.annotation)}"
+          except:
+            pass
+        args.append(arg_str)
+      args_str = ", ".join(args)
+      
+      # Add return type if present
+      ret_str = ""
+      if node.returns:
+        try:
+          ret_str = f" -> {ast.unparse(node.returns)}"
+        except:
+          pass
+      
+      sig = f"async def {node.name}({args_str}){ret_str}:"
+      out.append(sig)
+      self.generic_visit(node)
+    def visit_ClassDef(self, node: ast.ClassDef):
+      self._decos(node)
+      bases = []
+      for b in node.bases:
+        try:
+          bases.append(ast.unparse(b))
+        except Exception:
+          bases.append(getattr(getattr(b, "id", None), "id", None) or "…")
+      base_str = f"({', '.join(bases)})" if bases else ""
+      out.append(f"class {node.name}{base_str}:")
+      self.generic_visit(node)
+  _V().visit(tree)
+  return "\n".join(out)
+
+_JS_FUNC_RE = re.compile(r"^(export\s+)?(async\s+)?function\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*{", re.M)
+_JS_CLASS_RE = re.compile(r"^(export\s+)?class\s+([A-Za-z0-9_]+)\s*(extends\s+[A-Za-z0-9_\.]+)?\s*{", re.M)
+_JS_EXPORTS_RE = re.compile(r"^export\s+(default\s+)?(const|let|var|function|class)\s+([A-Za-z0-9_]+)", re.M)
+
+def render_js_ts_skeleton(src: str) -> str:
+  headers = []
+  for m in _JS_CLASS_RE.finditer(src):
+    ex = (m.group(3) or "").strip()
+    cls = m.group(2)
+    headers.append(("export " if m.group(1) else "") + f"class {cls} {ex}".rstrip()+" { … }")
+  for m in _JS_FUNC_RE.finditer(src):
+    name = m.group(3)
+    headers.append(("export " if m.group(1) else "") + f"function {name}(…) {{ … }}")
+  for m in _JS_EXPORTS_RE.finditer(src):
+    dflt = "default " if (m.group(1) or "").strip() else ""
+    kind = m.group(2); name = m.group(3)
+    headers.append(f"export {dflt}{kind} {name} …")
+  return "\n".join(dict.fromkeys(headers))  # stable, unique, keep order
+
+def render_skeleton(language: str|None, src: str) -> str:
+  lang = (language or "").lower()
+  if lang.startswith("py"): return render_python_skeleton(src)
+  if "typescript" in lang or lang.startswith("ts"): return render_js_ts_skeleton(src)
+  if "javascript" in lang or lang.startswith("js"): return render_js_ts_skeleton(src)
+  # fallback: simple headers for C-like
+  heads = []
+  for ln in src.splitlines():
+    if re.match(r"^\s*(class|[A-Za-z_][A-Za-z0-9_]*\s+\**[A-Za-z_][A-Za-z0-9_]*\s*\([^;{]*\)\s*)[{;]", ln):
+      heads.append(ln.strip().rstrip("{") + " { … }")
+  return "\n".join(heads)
