@@ -215,69 +215,98 @@ def main(argv=None) -> int:
   except:
     __version__ = "1.4.1"
   
-  ap = argparse.ArgumentParser(prog="harvest", description="Reap codebases into portable JSON + chunks; query & serve.")
+  ap = argparse.ArgumentParser(
+    prog="harvest", 
+    description="Harvest codebases into portable JSON + chunks for RAG, analysis, and tooling.",
+    epilog="Examples:\n"
+           "  harvest serve                    # Watch + serve current directory\n"
+           "  harvest reap . --include data    # Harvest just file contents\n"
+           "  harvest reap . --format jsonl    # Output as JSONL for streaming\n"
+           "  harvest query out.json --entity chunks --language python\n",
+    formatter_class=argparse.RawDescriptionHelpFormatter
+  )
   ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
   sub = ap.add_subparsers(dest="cmd", required=True)
   
   # reap command
-  pr = sub.add_parser("reap", help="Create a harvest from local dir or GitHub URL.")
-  pr.add_argument("target")
-  pr.add_argument("-o", "--out", default=None, help="Output JSON path (default: ./codebase.harvest.json)")
-  pr.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
-  pr.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
-  pr.add_argument("--format", choices=("json","jsonl"), default="json", help="Output format")
-  pr.add_argument("--mirror-out", help="Optional second output path")
+  pr = sub.add_parser("reap", help="Create a harvest from local directory or GitHub URL.",
+                      description="Extract files and code chunks from a codebase into structured JSON.")
+  pr.add_argument("target", help="Local directory path or GitHub URL to harvest")
+  pr.add_argument("-o", "--out", default=None, 
+                  help="Output file path (default: ./codebase.harvest.json)")
+  pr.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES,
+                  help=f"Max bytes per file (default: {DEFAULT_MAX_BYTES})")
+  pr.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES,
+                  help=f"Max files to process (default: {DEFAULT_MAX_FILES})")
+  pr.add_argument("--format", choices=("json","jsonl"), default="json", 
+                  help="Output format: json (single object) or jsonl (line-delimited)")
+  pr.add_argument("--mirror-out", help="Write a second copy to this path")
   pr.add_argument("--no-default-excludes", action="store_true",
-                  help="Do not apply the built-in exclude lists (folders, extensions, lockfiles)")
+                  help="Include hidden files, tests, node_modules, etc. (normally excluded)")
   pr.add_argument("--include", nargs="+", choices=["metadata", "data", "chunks"], 
                   default=["metadata", "data", "chunks"],
-                  help="What to include in output (default: all)")
+                  help="Sections to include: metadata (file info), data (file contents), chunks (parsed symbols)")
   pr.add_argument("--exclude", nargs="+", choices=["metadata", "data", "chunks"],
-                  help="What to exclude from output")
+                  help="Sections to exclude from output")
   pr.set_defaults(func=cmd_reap)
   
   # query command
-  pq = sub.add_parser("query", help="Query files or chunks.")
-  pq.add_argument("json")
-  pq.add_argument("--entity", choices=["files", "chunks"], default="files")
-  pq.add_argument("--language")
-  pq.add_argument("--kind")
-  pq.add_argument("--path-glob")
-  pq.add_argument("--path-regex")
-  pq.add_argument("--symbol-regex")
-  pq.add_argument("--export-named")
-  pq.add_argument("--has-default-export", action="store_true")
-  pq.add_argument("--public", choices=["true", "false"])
-  pq.add_argument("--min-lines", type=int)
-  pq.add_argument("--max-lines", type=int)
-  pq.add_argument("--fields")
+  pq = sub.add_parser("query", help="Search and filter harvest data.",
+                      description="Query files or chunks with filters for language, symbols, exports, etc.")
+  pq.add_argument("json", help="Path to harvest JSON file")
+  pq.add_argument("--entity", choices=["files", "chunks"], default="files",
+                  help="Query files or code chunks (default: files)")
+  pq.add_argument("--language", help="Filter by programming language (e.g. python, javascript)")
+  pq.add_argument("--kind", help="Filter chunks by kind (e.g. function, class, export)")
+  pq.add_argument("--path-glob", help="Filter by file path glob pattern")
+  pq.add_argument("--path-regex", help="Filter by file path regex")
+  pq.add_argument("--symbol-regex", help="Filter chunks by symbol name regex")
+  pq.add_argument("--export-named", help="Filter files that export specific named symbol")
+  pq.add_argument("--has-default-export", action="store_true", help="Filter files with default exports")
+  pq.add_argument("--public", choices=["true", "false"], help="Filter by public/private visibility")
+  pq.add_argument("--min-lines", type=int, help="Minimum line count")
+  pq.add_argument("--max-lines", type=int, help="Maximum line count")
+  pq.add_argument("--fields", help="Comma-separated fields to output")
   pq.set_defaults(func=cmd_query)
   
   # sow command
-  ps = sub.add_parser("sow", help="Generate artifacts from a harvest (React barrel).")
-  ps.add_argument("json")
-  ps.add_argument("--react", dest="react_out")
+  ps = sub.add_parser("sow", help="Generate code artifacts from harvest data.",
+                      description="Transform harvest data into useful artifacts like React barrel exports.")
+  ps.add_argument("json", help="Path to harvest JSON file")
+  ps.add_argument("--react", dest="react_out", help="Generate React barrel file at this path")
   ps.set_defaults(func=cmd_sow)
   
   # serve command
-  pv = sub.add_parser("serve", help="Serve a local web UI with live updates (watch + serve).")
-  pv.add_argument("harvest_or_dir", nargs="?", default=".", help="Path to harvest JSON or directory (default: current dir)")
-  pv.add_argument("--port", type=int, default=8787)
-  pv.add_argument("--no-watch", action="store_true", help="Disable watching for file changes")
-  pv.add_argument("--debounce-ms", type=int, default=800, help="Debounce time in milliseconds")
-  pv.add_argument("--poll", type=float, default=1.0, help="Polling interval in seconds")
-  pv.add_argument("--only-ext", default=None, help="Comma-separated list of extensions to include")
-  pv.add_argument("--skip-ext", default=None, help="Comma-separated list of extensions to exclude")
+  pv = sub.add_parser("serve", help="Start web UI with live updates (default mode).",
+                      description="Serve interactive web interface with auto-refresh. Watches files by default.")
+  pv.add_argument("harvest_or_dir", nargs="?", default=".", 
+                  help="Directory to watch or harvest file to serve (default: current directory)")
+  pv.add_argument("--port", type=int, default=8787, help="HTTP server port (default: 8787)")
+  pv.add_argument("--no-watch", action="store_true", help="Disable file watching (static serve only)")
+  pv.add_argument("--debounce-ms", type=int, default=800, 
+                  help="File change debounce time in milliseconds (default: 800)")
+  pv.add_argument("--poll", type=float, default=1.0, 
+                  help="File system polling interval in seconds (default: 1.0)")
+  pv.add_argument("--only-ext", default=None, 
+                  help="Include only these extensions (comma-separated, e.g. py,ts,js)")
+  pv.add_argument("--skip-ext", default=None, 
+                  help="Exclude these extensions (comma-separated)")
   pv.set_defaults(func=cmd_serve)
   
   # watch command
-  pw = sub.add_parser("watch", help="Watch a source directory and incrementally re-harvest on changes")
-  pw.add_argument("source", help="Path to source directory to watch")
-  pw.add_argument("-o", "--out", required=False, help="Output harvest JSON file (default: ./codebase.harvest.json)")
-  pw.add_argument("--debounce-ms", type=int, default=800, help="Debounce time in milliseconds")
-  pw.add_argument("--poll", type=float, default=1.0, help="Polling interval in seconds")
-  pw.add_argument("--only-ext", default=None, help="Comma-separated list of extensions to include (e.g. py,ts,js)")
-  pw.add_argument("--skip-ext", default=None, help="Comma-separated list of extensions to exclude")
+  pw = sub.add_parser("watch", help="Watch directory and update harvest file on changes.",
+                      description="Monitor source directory and incrementally update harvest when files change.")
+  pw.add_argument("source", help="Source directory to watch for changes")
+  pw.add_argument("-o", "--out", required=False, 
+                  help="Output harvest file path (default: ./codebase.harvest.json)")
+  pw.add_argument("--debounce-ms", type=int, default=800, 
+                  help="Debounce file changes in milliseconds (default: 800)")
+  pw.add_argument("--poll", type=float, default=1.0, 
+                  help="Polling interval in seconds (default: 1.0)")
+  pw.add_argument("--only-ext", default=None, 
+                  help="Include only these extensions (comma-separated, e.g. py,ts,js)")
+  pw.add_argument("--skip-ext", default=None, 
+                  help="Exclude these extensions (comma-separated)")
   pw.set_defaults(func=cmd_watch)
   
   args = ap.parse_args(argv)

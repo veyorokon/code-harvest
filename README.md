@@ -156,25 +156,103 @@ GET /api/harvest                # returns the current JSON, uncached, with ETag
 
 The watcher uses portable polling that works on all platforms and performs incremental re-harvesting when files change.
 
+## CLI Reference
+
+### harvest reap - Extract codebase data
+```bash
+harvest reap [OPTIONS] <directory_or_url>
+
+# Basic usage
+harvest reap .                           # Current directory → ./codebase.harvest.json
+harvest reap /path/to/project            # Specific directory
+harvest reap https://github.com/user/repo  # GitHub repository
+
+# Output control
+harvest reap . --include metadata        # File inventory only
+harvest reap . --include data           # File contents only
+harvest reap . --include chunks         # Parsed symbols only
+harvest reap . --exclude chunks         # Files without parsing
+harvest reap . --format jsonl           # Line-delimited JSON
+
+# Size limits
+harvest reap . --max-files 1000 --max-bytes 512000
+
+# Advanced
+harvest reap . --no-default-excludes    # Include hidden files, tests, etc.
+harvest reap . --mirror-out backup.json # Write second copy
+```
+
+### harvest serve - Interactive web UI (default: watch + serve)
+```bash
+harvest serve [OPTIONS] [directory_or_file]
+
+# Basic usage
+harvest serve                    # Watch current dir, serve at :8787
+harvest serve /path/to/project   # Watch specific directory
+harvest serve --port 8080        # Custom port
+
+# Control watching
+harvest serve --no-watch         # Static serve only (no file watching)
+harvest serve --debounce-ms 500  # Faster file change detection
+harvest serve --only-ext py,ts   # Watch only Python/TypeScript files
+```
+
+### harvest query - Search and filter data
+```bash
+harvest query [OPTIONS] <harvest.json>
+
+# Basic queries
+harvest query data.json --entity files --language python
+harvest query data.json --entity chunks --kind function
+harvest query data.json --path-regex "src/.*\\.ts$"
+
+# Advanced filtering
+harvest query data.json --entity chunks --public true --min-lines 10
+harvest query data.json --export-named "MyComponent" --has-default-export
+harvest query data.json --symbol-regex "^test_.*" --fields path,symbol,start_line
+```
+
+### harvest watch - Monitor directory for changes
+```bash
+harvest watch [OPTIONS] <directory>
+
+# Basic usage  
+harvest watch .                          # Watch current dir → ./codebase.harvest.json
+harvest watch /path/to/src -o out.json   # Custom output path
+harvest watch . --debounce-ms 500        # Faster change detection
+harvest watch . --only-ext py,js,ts      # Watch specific extensions only
+```
+
+### harvest sow - Generate artifacts
+```bash
+harvest sow [OPTIONS] <harvest.json>
+
+# Generate React barrel exports
+harvest sow data.json --react src/index.ts
+```
+
 ## Output Control
 
-You can control what's included in the harvest output:
+Control what sections are included in harvest output:
 
-- **`--include metadata data`** - Just files and metadata (faster, smaller)
-- **`--include data`** - Just file contents (minimal output)  
-- **`--exclude chunks`** - Skip chunk generation (useful for simple file archiving)
-- **`--include chunks`** - Just chunks (for code analysis without full content)
+- **`--include metadata`** - File inventory: paths, sizes, languages, modification times
+- **`--include data`** - File contents: full source code of each file  
+- **`--include chunks`** - Parsed symbols: functions, classes, exports with line ranges
+- **`--exclude chunks`** - Skip code parsing (faster, smaller output)
 
-Common use cases:
+**Common patterns:**
 ```bash
-# Fast file inventory without content
+# Fast file catalog
 harvest reap . --include metadata
 
-# Full content without chunking overhead  
+# Source archive  
 harvest reap . --exclude chunks
 
-# Just chunks for LLM context
+# LLM context preparation
 harvest reap . --include chunks --format jsonl
+
+# Full analysis dataset
+harvest reap . --include metadata data chunks  # (default)
 ```
 
 ## Output Schema
@@ -252,6 +330,28 @@ harvest-code intelligently skips common non-source files:
 **Lockfiles**: `yarn.lock`, `package-lock.json`, `poetry.lock`, `Cargo.lock`, `go.sum`, etc.
 
 Use `--no-default-excludes` to include everything.
+
+## Smart Filtering & File Handling
+
+**Completely Skipped** (no paths, no content):
+- Hidden files/directories (`.env`, `.git/`, `.vscode/`)
+- Test directories (`tests/`, `__tests__/`, `spec/`, `e2e/`)
+- Build artifacts (`dist/`, `build/`, `node_modules/`)
+- Config files (`.ini`, `.cfg`, `.properties`)
+- Logs & temp files (`.log`, `.tmp`, `.cache/`)
+- Binary/media files (`.exe`, `.mp3`, `.db`)
+
+**Path-Only Listing** (shows in file list, no content):
+- Images (`.jpg`, `.png`, `.svg`, `.gif`)
+- Fonts (`.ttf`, `.woff`, `.woff2`)  
+- Documents (`.pdf`, `.doc`, `.ppt`)
+
+**Fully Processed** (content + chunks):
+- Source code files in supported languages
+- Configuration files (JSON, YAML, TOML)
+- Documentation (Markdown, text files)
+
+Override with `--no-default-excludes` to include everything.
 
 ## Language Support
 
